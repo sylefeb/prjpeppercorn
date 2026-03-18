@@ -20,10 +20,15 @@ import die
 import os
 from die import Die, Location, Connection
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, FrozenSet, Optional
 from timing import decompress_timing
 
 DATABASE_VERSION = 1.12
+
+# WA bank pin whitelists for CCGM1A2:
+# All A0..A8 and B0..B8 are on die 1A except B3, which is assigned to die 1B.
+WA_BANK_1A_PINS = {f"A{i}" for i in range(9)} | ({f"B{i}" for i in range(9)} - {"B3"})
+WA_BANK_1B_PINS = {"B3"}
 
 @dataclass(eq=True, order=True)
 class Pad:
@@ -40,6 +45,16 @@ class Pad:
 class Bank:
     die : str
     bank: str
+    pins: Optional[FrozenSet[str]] = None  # None means all pins; otherwise a set like {"A5","A6","B0"}
+    
+    def __post_init__(self):
+        if self.pins is None:
+            return
+        if isinstance(self.pins, str):
+            # Treat a single string as a single pin name, not an iterable of characters
+            self.pins = frozenset({self.pins})
+        else:
+            self.pins = frozenset(self.pins)
 
 @dataclass
 class TimingDelay:
@@ -166,6 +181,10 @@ class Chip:
             for bank in banks:
                 for p in ["A","B"]:
                     for num in range(9):
+                        pin_id = f"{p}{num}"
+                        # Skip if this bank only covers specific pins and this isn't one
+                        if bank.pins is not None and pin_id not in bank.pins:
+                            continue
                         d = self.dies[bank.die]
                         ddr = d.ddr_i[bank.bank]
                         loc = d.io_pad_names[bank.bank][p][num]
@@ -205,7 +224,7 @@ CCGM1_DEVICES = {
                         "EB" : [ Bank("1B", "N2") ],
                         "NA" : [ Bank("1A", "E1"), Bank("1B", "E1") ],
                         "NB" : [ Bank("1A", "E2") ],
-                        "WA" : [ Bank("1A", "S3") ],
+                        "WA" : [ Bank("1A", "S3", WA_BANK_1A_PINS), Bank("1B", "S3", WA_BANK_1B_PINS) ],
                         "WB" : [ Bank("1A", "N1"), Bank("1B", "S1") ],
                         "WC" : [ Bank("1A", "S2") ],
                         "SA" : [ Bank("1A", "W1") ],
